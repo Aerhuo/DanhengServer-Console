@@ -1,8 +1,8 @@
 # DanhengServer-Console 项目
 
-一个基于 C++ 构建的DanhengServer控制台，更多功能正在编写中。
-
 > 本项目仅供学习交流使用，请勿用于商业用途。
+
+一个基于 C++ 构建的DanhengServer控制台，更多功能正在编写中。
 
 ## 项目简介
 
