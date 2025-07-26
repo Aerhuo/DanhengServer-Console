@@ -46,7 +46,7 @@ git clone https://github.com/Microsoft/vcpkg.git
 vcpkg install
 ```
 
-### Step 1: 构建项目
+### Step 3: 构建项目
 
 ```bash
 mkdir build
