@@ -26,7 +26,10 @@ static void GetItemMenu()
 
 int main()
 {
-    buffer("欢迎使用DanhengServer-Console项目", Info);
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+    
+    buffer("欢迎使用DanhengServer-Console项目!", Info);
     buffer("本项目仅供学习交流使用，请勿用于商业用途", Info);
 
     ConsoleOutputManager::start(); // 启动输出线程
@@ -43,7 +46,7 @@ int main()
      // 开启自动保存
     try
     {
-        if (config["autosaverEnable"])
+        if (config["autosave"])
         {
             AutoSaver::start(config["database_file"],
                              config["autosave_file"],
