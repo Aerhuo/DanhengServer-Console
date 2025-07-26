@@ -27,17 +27,30 @@
 
 - [vcpkg](https://github.com/microsoft/vcpkg)
 - [CMake](https://cmake.org/download/) ≥3.21
+- Windows 10及以上
 
-### Srep 1: 安装依赖项
+### Step 1: 克隆仓库
+```bash
+git clone https://github.com/Aerhuo/DanhengServer-Console.git
+cd DanhengServer-Console
+```
+确保你安装了vcpkg，如果没有安装，请执行
+```bash
+git clone https://github.com/Microsoft/vcpkg.git
+.\vcpkg\bootstrap-vcpkg.bat
+```
+
+### Step 2: 安装依赖项
 
 ```bash
 vcpkg install
 ```
 
-### Step 2: 构建项目
+### Step 1: 构建项目
 
 ```bash
-mkdir build && cd build
+mkdir build
+cd build
 cmake ..
 cmake --build . --config Release 或 cmake --build .
 ```
