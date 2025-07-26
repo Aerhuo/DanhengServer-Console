@@ -1,0 +1,129 @@
+# 设置最低 CMake 版本要求
+cmake_minimum_required(VERSION 3.21)
+
+# 定义项目名及使用语言
+project(DanhengServerConsole LANGUAGES CXX)
+
+# 设置 C++ 标准为 17，并强制启用
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# 设置源文件编码为 UTF-8，适配多种编译器
+add_compile_options(
+    "$<$<CXX_COMPILER_ID:MSVC>:/utf-8>"                          # MSVC
+    "$<$<OR:$<CXX_COMPILER_ID:Clang>,$<CXX_COMPILER_ID:GNU>>:-finput-charset=UTF-8>" # Clang / GCC / MinGW
+)
+
+# 添加自定义模块路径，用于扩展功能（如自动配置 vcpkg）
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(VcpkgSetup) # 自定义模块，用于 find_or_install_vcpkg 宏
+
+# 自动探测或安装 vcpkg 并记录路径
+find_or_install_vcpkg(VCPKG_ROOT)
+message(STATUS "使用 vcpkg 路径：${VCPKG_ROOT}")
+
+# 设置 vcpkg 的工具链文件与 triplet
+set(CMAKE_TOOLCHAIN_FILE "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
+set(VCPKG_TARGET_TRIPLET "x64-windows" CACHE STRING "")
+set(VCPKG_MANIFEST_MODE ON)
+
+# 添加 vcpkg 安装路径到 prefix，使得 find_package 可用
+list(APPEND CMAKE_PREFIX_PATH "${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}")
+
+# 使用 CONFIG 模式查找所需库，确保链接的是正确版本
+find_package(OpenSSL CONFIG REQUIRED)
+find_package(CURL CONFIG REQUIRED)
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
+
+# 自动递归查找源文件，支持动态变更
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/src/*.cpp")
+
+# 创建可执行目标
+add_executable(${PROJECT_NAME} ${SOURCES})
+
+# 链接依赖库到目标
+target_link_libraries(${PROJECT_NAME}
+    PRIVATE
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    CURL::libcurl
+    nlohmann_json::nlohmann_json
+    ZLIB::ZLIB
+)
+
+# 设置目标的包含路径
+target_include_directories(${PROJECT_NAME}
+    PRIVATE "${CMAKE_SOURCE_DIR}/include"
+)
+
+# 设置输出目录（Debug/Release 共用 bin 路径）
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_SOURCE_DIR}/bin"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_SOURCE_DIR}/bin"
+)
+
+# 使用 TARGET_RUNTIME_DLLS 自动复制主要依赖 DLL（适配 MSVC 和部分 MinGW）
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+    COMMAND_EXPAND_LISTS
+)
+
+# 判断是否启用 Debug 模式（用于特殊处理）
+string(TOLOWER "${CMAKE_BUILD_TYPE}" build_type_lower)
+
+# 启用 DLL 自动复制（适用于 MSVC / MinGW / Clang）
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_RUNTIME_DLLS:${PROJECT_NAME}>
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+    COMMAND_EXPAND_LISTS
+)
+
+# 启用 CMake DLL 自动收集机制
+set_property(TARGET ${PROJECT_NAME} PROPERTY
+    ENABLE_EXPORTS TRUE
+)
+
+function(add_debug_dll_dependency DLL_NAME)
+    # 根据工具链选择 DLL 路径（包含 debug/bin 和 bin 兼容）
+    if(MSVC OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        set(_dll_path_debug "${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/debug/bin/${DLL_NAME}")
+        set(_dll_path_release "${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/bin/${DLL_NAME}")
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        set(_dll_path_debug "${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/debug/bin/${DLL_NAME}")
+        set(_dll_path_release "${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/bin/${DLL_NAME}")
+    else()
+        message(WARNING "[add_debug_dll_dependency] 未知工具链：${CMAKE_CXX_COMPILER_ID}")
+        return()
+    endif()
+
+    # 如果是单配置生成器，则用 CMAKE_BUILD_TYPE 判断
+    if(NOT CMAKE_CONFIGURATION_TYPES)
+        string(TOLOWER "${CMAKE_BUILD_TYPE}" build_type_lower)
+        if(build_type_lower STREQUAL "debug")
+            if(EXISTS "${_dll_path_debug}")
+                add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll_path_debug}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+                    COMMAND ${CMAKE_COMMAND} -E echo "[单配置生成器] 已拷贝 Debug DLL：${DLL_NAME}"
+                )
+            else()
+                message(WARNING "[add_debug_dll_dependency] Debug DLL 不存在：${_dll_path_debug}")
+            endif()
+        endif()
+    else()
+        # 多配置生成器（如 Visual Studio）用 generator expressions 判断配置
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo "[多配置生成器] 正在拷贝 Debug DLL（如适用）：${DLL_NAME}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<IF:$<CONFIG:Debug>,${_dll_path_debug},>"
+                "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
+            VERBATIM
+        )
+    endif()
+endfunction()
+
+add_debug_dll_dependency("zlibd1.dll")

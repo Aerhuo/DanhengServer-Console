@@ -1,0 +1,10 @@
+{
+  "name": "danhengserver-console",
+  "version": "0.1.0",
+  "dependencies": [
+    "openssl",
+    "curl",
+    "nlohmann-json",
+    "zlib"
+  ]
+}
