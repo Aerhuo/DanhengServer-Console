@@ -97,27 +97,27 @@ function(add_debug_dll_dependency DLL_NAME)
         set(_dll_path_debug "${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/debug/bin/${DLL_NAME}")
         set(_dll_path_release "${VCPKG_ROOT}/installed/${VCPKG_TARGET_TRIPLET}/bin/${DLL_NAME}")
     else()
-        message(WARNING "[add_debug_dll_dependency] 未知工具链：${CMAKE_CXX_COMPILER_ID}")
+        message(WARNING "[add_debug_dll_dependency] Unknown toolchain: ${CMAKE_CXX_COMPILER_ID}")
         return()
     endif()
 
-    # 如果是单配置生成器，则用 CMAKE_BUILD_TYPE 判断
+    # 单配置生成器处理方式
     if(NOT CMAKE_CONFIGURATION_TYPES)
         string(TOLOWER "${CMAKE_BUILD_TYPE}" build_type_lower)
         if(build_type_lower STREQUAL "debug")
             if(EXISTS "${_dll_path_debug}")
                 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
                     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_dll_path_debug}" "$<TARGET_FILE_DIR:${PROJECT_NAME}>"
-                    COMMAND ${CMAKE_COMMAND} -E echo "[单配置生成器] 已拷贝 Debug DLL：${DLL_NAME}"
+                    COMMAND ${CMAKE_COMMAND} -E echo "[Single-config generator] Copied Debug DLL: ${DLL_NAME}"
                 )
             else()
-                message(WARNING "[add_debug_dll_dependency] Debug DLL 不存在：${_dll_path_debug}")
+                message(WARNING "[add_debug_dll_dependency] Debug DLL not found: ${_dll_path_debug}")
             endif()
         endif()
     else()
-        # 多配置生成器（如 Visual Studio）用 generator expressions 判断配置
+        # 多配置生成器（如 Visual Studio）
         add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "[多配置生成器] 正在拷贝 Debug DLL（如适用）：${DLL_NAME}"
+            COMMAND ${CMAKE_COMMAND} -E echo "[Multi-config generator] Copying Debug DLL (if applicable): ${DLL_NAME}"
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<IF:$<CONFIG:Debug>,${_dll_path_debug},>"
                 "$<TARGET_FILE_DIR:${PROJECT_NAME}>"

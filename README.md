@@ -30,14 +30,10 @@
 - Windows 10及以上
 
 ### Step 1: 克隆仓库
+
 ```bash
 git clone https://github.com/Aerhuo/DanhengServer-Console.git
 cd DanhengServer-Console
-```
-确保你安装了vcpkg，如果没有安装，请执行
-```bash
-git clone https://github.com/Microsoft/vcpkg.git
-.\vcpkg\bootstrap-vcpkg.bat
 ```
 
 ### Step 2: 安装依赖项
@@ -46,11 +42,12 @@ git clone https://github.com/Microsoft/vcpkg.git
 vcpkg install
 ```
 
+如果你没有安装vcpkg，直接进行第三步，将会自动安装vcpkg并安装依赖项。
+
 ### Step 3: 构建项目
 
 ```bash
-mkdir build
-cd build
+mkdir build && cd build
 cmake ..
 cmake --build . --config Release 或 cmake --build .
 ```
