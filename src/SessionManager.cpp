@@ -1,4 +1,5 @@
 #include "SessionManager.hpp"
+#include "ConsoleOutputManager.hpp"
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #include <openssl/bio.h>
@@ -18,7 +19,7 @@ static size_t WriteCallback(void *contents, size_t size, size_t nmemb, std::stri
     return size * nmemb;
 }
 
-std::string base64Encode(const std::string &binary)
+std::string SessionManager::base64Encode(const std::string &binary)
 {
     BIO *bmem = BIO_new(BIO_s_mem());
     BIO *b64 = BIO_new(BIO_f_base64());
@@ -35,44 +36,75 @@ std::string base64Encode(const std::string &binary)
     return result;
 }
 
+std::string SessionManager::base64Decode(const std::string& in) {
+    // 1. 创建并配置 Base64 BIO，关闭换行检查
+    BIO* b64 = BIO_new(BIO_f_base64());
+    BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+
+    // 2. 从内存缓冲区创建 BIO，并将其压入链中
+    BIO* mem = BIO_new_mem_buf(in.data(), static_cast<int>(in.size()));
+    BIO* bio = BIO_push(b64, mem);
+
+    // 3. 分配缓冲区并解码
+    int max_len = static_cast<int>(in.size() * 3 / 4) + 1;
+    std::vector<char> buf(max_len);
+    int len = BIO_read(bio, buf.data(), max_len);
+
+    // 4. 释放 BIO 资源
+    BIO_free_all(bio);
+
+    if (len <= 0) {
+        return {};  // 解码失败或无内容
+    }
+
+    // 5. 构造字符串并去除首尾的 CR/LF
+    std::string out(buf.data(), len);
+    size_t first = out.find_first_not_of("\r\n");
+    size_t last  = out.find_last_not_of("\r\n");
+    if (first == std::string::npos) {
+        return {};  // 全是回车或换行
+    }
+    return out.substr(first, last - first + 1);
+}
+
 std::string encrypt(const std::string &rsaPublicKeyPEM, const std::string &adminKeyPlain)
 {
     BIO *bio = BIO_new_mem_buf(rsaPublicKeyPEM.data(), (int)rsaPublicKeyPEM.size());
     if (!bio)
-        throw std::runtime_error("[ERROR] 无法创建 BIO");
+        buffer("无法创建 BIO", MessageType::Error);
 
     EVP_PKEY *pubkey = PEM_read_bio_PUBKEY(bio, nullptr, nullptr, nullptr);
     BIO_free(bio);
     if (!pubkey)
-        throw std::runtime_error("[ERROR] 无法读取公钥 PEM");
+        buffer("无法读取公钥 PEM", MessageType::Error);
 
     EVP_PKEY_CTX *ctx = EVP_PKEY_CTX_new(pubkey, nullptr);
     if (!ctx)
-        throw std::runtime_error("[ERROR] 无法创建加密上下文");
+        buffer("无法创建加密上下文", MessageType::Error);
 
     if (EVP_PKEY_encrypt_init(ctx) <= 0)
-        throw std::runtime_error("[ERROR] 加密初始化失败");
+        buffer("加密初始化失败", MessageType::Error);
 
     if (EVP_PKEY_CTX_set_rsa_padding(ctx, RSA_PKCS1_PADDING) <= 0)
-        throw std::runtime_error("[ERROR] 设置填充失败");
+        buffer("设置填充失败", MessageType::Error);
 
     size_t outlen = 0;
     if (EVP_PKEY_encrypt(ctx, nullptr, &outlen,
                          (const unsigned char *)adminKeyPlain.data(),
                          adminKeyPlain.size()) <= 0)
-        throw std::runtime_error("[ERROR] 计算加密长度失败");
+        buffer("计算加密长度失败", MessageType::Error);
 
     std::string encrypted(outlen, '\0');
     if (EVP_PKEY_encrypt(ctx, (unsigned char *)encrypted.data(), &outlen,
                          (const unsigned char *)adminKeyPlain.data(),
                          adminKeyPlain.size()) <= 0)
-        throw std::runtime_error("[ERROR] 加密失败");
+        buffer("加密失败", MessageType::Error);
 
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(pubkey);
 
     encrypted.resize(outlen);
-    return base64Encode(encrypted);
+    return SessionManager::base64Encode(encrypted);
 }
 
 json SessionManager::createSession(const std::string &serverUrl)
@@ -81,7 +113,7 @@ json SessionManager::createSession(const std::string &serverUrl)
 
     if (!curl)
     {
-        throw std::runtime_error("[ERROR] 无法初始化 CURL");
+        buffer("无法初始化 CURL", MessageType::Error);
     }
 
     std::string url = serverUrl + "/muip/create_session";
@@ -104,7 +136,7 @@ json SessionManager::createSession(const std::string &serverUrl)
     curl_slist_free_all(headers);
 
     if (res != CURLE_OK)
-        throw std::runtime_error("[ERROR] 创建会话请求失败: " + std::string(curl_easy_strerror(res)));
+        buffer("创建会话请求失败: " + std::string(curl_easy_strerror(res)), MessageType::Error);
     return json::parse(responseStr);
 }
 
@@ -118,7 +150,7 @@ json SessionManager::authorize(const std::string &serverUrl, const std::string &
 
     CURL *curl = curl_easy_init();
     if (!curl)
-        throw std::runtime_error("[ERROR] 无法初始化 CURL");
+        buffer("无法初始化 CURL", MessageType::Error);
     std::string url = serverUrl + "/muip/auth_admin";
     std::string postData = requestBody.dump();
     std::string responseStr;
@@ -138,7 +170,7 @@ json SessionManager::authorize(const std::string &serverUrl, const std::string &
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK)
-        throw std::runtime_error("[ERROR] 授权请求失败: " + std::string(curl_easy_strerror(res)));
+        buffer("授权请求失败: " + std::string(curl_easy_strerror(res)), MessageType::Error);
 
     return json::parse(responseStr);
 }
@@ -150,7 +182,7 @@ json SessionManager::getServerStatus(const std::string &serverUrl, const std::st
     };
     CURL *curl = curl_easy_init();
     if (!curl)
-        throw std::runtime_error("[ERROR] 无法初始化 CURL");
+        buffer("无法初始化 CURL", MessageType::Error);
 
     std::string url = serverUrl + "/muip/server_information";
     std::string postData = requestBody.dump();
@@ -170,7 +202,7 @@ json SessionManager::getServerStatus(const std::string &serverUrl, const std::st
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK)
-        throw std::runtime_error("[ERROR] 获取服务器状态失败: " + std::string(curl_easy_strerror(res)));
+        buffer("获取服务器状态失败: " + std::string(curl_easy_strerror(res)), MessageType::Error);
     return json::parse(responseStr);
 }
 
@@ -182,7 +214,7 @@ json SessionManager::getPlayerInfo(const std::string &serverUrl, const std::stri
     };
     CURL *curl = curl_easy_init();
     if (!curl)
-        throw std::runtime_error("[ERROR] 无法初始化 CURL");
+        buffer("无法初始化 CURL", MessageType::Error);
 
     std::string url = serverUrl + "/muip/player_information";
     std::string postData = requestBody.dump();
@@ -202,7 +234,7 @@ json SessionManager::getPlayerInfo(const std::string &serverUrl, const std::stri
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK)
-        throw std::runtime_error("[ERROR] 获取玩家信息失败: " + std::string(curl_easy_strerror(res)));
+        buffer("获取玩家信息失败: " + std::string(curl_easy_strerror(res)), MessageType::Error);
     return json::parse(responseStr);
 }
 
@@ -217,7 +249,7 @@ json SessionManager::submitCommand(const std::string &serverUrl, const std::stri
 
     CURL *curl = curl_easy_init();
     if (!curl)
-        throw std::runtime_error("[ERROR] 无法初始化 CURL");
+        buffer("无法初始化 CURL", MessageType::Error);
 
     std::string url = serverUrl + "/muip/exec_cmd";
     std::string postData = requestBody.dump();
@@ -237,6 +269,6 @@ json SessionManager::submitCommand(const std::string &serverUrl, const std::stri
     curl_easy_cleanup(curl);
 
     if (res != CURLE_OK)
-        throw std::runtime_error("[ERROR] 命令提交失败: " + std::string(curl_easy_strerror(res)));
+        buffer("命令提交失败: " + std::string(curl_easy_strerror(res)), MessageType::Error);
     return json::parse(responseStr);
 }

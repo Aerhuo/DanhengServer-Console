@@ -6,7 +6,7 @@
 #include <conio.h>
 
 // 延迟打印每个字符的时间（毫秒）
-int ConsoleOutputManager::delayMs = 10;
+int ConsoleOutputManager::delayMs = 2;
 
 // 输出队列和同步机制
 std::queue<ConsoleMessage> ConsoleOutputManager::queue;

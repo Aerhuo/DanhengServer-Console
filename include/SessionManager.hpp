@@ -7,6 +7,8 @@ using json = nlohmann::json;
 class SessionManager
 {
 public:
+    static std::string base64Encode(const std::string &binary);
+    static std::string base64Decode(const std::string& in);
     static json GetServerStatus(const std::string &serverUrl, const std::string &adminKeyPlain)
     {
         json session = createSession(serverUrl);

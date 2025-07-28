@@ -1,31 +1,23 @@
 #pragma once
-#include <thread>
-#include <queue>
 #include <string>
+#include <thread>
 #include <mutex>
-#include <condition_variable>
-#include <atomic>
 
 class ConsoleInputManager
 {
 public:
-    static void start();
+    // 每次调用 read() 时才启动一次输入线程，直到用户敲回车后线程结束
     static std::string read();
-    static std::string getTypingShadow();  // 获取打字期间输入
 
 private:
-    static void inputLoop();
-    static std::atomic<bool> isRunning;
-    static std::thread inputThread;
-    static std::queue<std::string> inputQueue;
-    static std::mutex queueMutex;
-    static std::condition_variable queueCond;
-    static std::string typingShadow;
-    static std::mutex shadowMutex;
+    // 实际做输入读取的函数：收集字符直到 '\r'，然后退出
+    static void inputLoop(std::string& outLine);
 
-    class InputManagerFinalizer {
-    public:
-        ~InputManagerFinalizer();
-    };
-    static InputManagerFinalizer finalizer;
+    // 当输出线程正在打印时，临时存放用户敲击的字符
+    static std::string typingShadow;
+    static std::mutex   shadowMutex;
 };
+
+inline std::string read(){
+    return ConsoleInputManager::read();
+}

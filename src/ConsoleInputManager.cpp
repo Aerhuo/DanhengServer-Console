@@ -1,91 +1,82 @@
 #include "ConsoleInputManager.hpp"
-#include "ConsoleOutputManager.hpp"
-#include <conio.h>
+#include "ConsoleOutputManager.hpp"  // 提供 getTyping()
+#include <conio.h>                   // _kbhit(), _getch()
 #include <iostream>
 #include <chrono>
+#include <thread>
 
-std::atomic<bool> ConsoleInputManager::isRunning{false};
-std::thread ConsoleInputManager::inputThread;
-std::queue<std::string> ConsoleInputManager::inputQueue;
-std::mutex ConsoleInputManager::queueMutex;
-std::condition_variable ConsoleInputManager::queueCond;
+// 静态成员变量在 .cpp 中初始化
 std::string ConsoleInputManager::typingShadow;
-std::mutex ConsoleInputManager::shadowMutex;
-ConsoleInputManager::InputManagerFinalizer ConsoleInputManager::finalizer;
-
-void ConsoleInputManager::start()
-{
-    if (isRunning.exchange(true))
-        return;
-    inputThread = std::thread([]()
-                              { inputLoop(); });
-}
+std::mutex   ConsoleInputManager::shadowMutex;
 
 std::string ConsoleInputManager::read()
 {
-    std::unique_lock<std::mutex> lock(queueMutex);
-    queueCond.wait(lock, []
-                   { return !inputQueue.empty(); });
+    // 本次调用要返回的完整一行输入
+    std::string line;
 
-    std::string input = inputQueue.front();
-    inputQueue.pop();
-    return input;
+    // 每次 read 之前，清空旧的 shadow
+    {
+        std::lock_guard<std::mutex> lock(shadowMutex);
+        typingShadow.clear();
+    }
+
+    // 启动输入循环线程，线程跑到敲回车为止
+    std::thread t(&ConsoleInputManager::inputLoop, std::ref(line));
+
+    // 阻塞等待输入线程结束
+    t.join();
+
+    // 返回本次用户敲入的一行文本
+    return line;
 }
 
-std::string ConsoleInputManager::getTypingShadow()
+void ConsoleInputManager::inputLoop(std::string& outLine)
 {
-    std::lock_guard<std::mutex> lock(shadowMutex);
-    return typingShadow;
-}
+    std::string buffer;                  // 存放本次正在输入的内容
+    bool lastTyping = ConsoleOutputManager::getTyping();
 
-void ConsoleInputManager::inputLoop()
-{
-    std::string buffer;
-    bool lastTypingState = ConsoleOutputManager::getTyping();
-
-    while (isRunning.load())
+    while (true)
     {
         bool currentTyping = ConsoleOutputManager::getTyping();
 
-        // 检测 typing 状态变化：true → false
-        if (lastTypingState && !currentTyping)
+        // 输出线程从打印状态切换到非打印状态
+        if (lastTyping && !currentTyping)
         {
             std::lock_guard<std::mutex> lock(shadowMutex);
-            std::cout <<"\n> ";
-            if (!typingShadow.empty())
-            {
-                std::cout << typingShadow;
-                typingShadow.clear();
-            }
+            // 恢复行首提示符及打印中敲的内容
+            std::cout << "\n> " << typingShadow;
+            buffer = typingShadow;       // 将 shadow 拷贝到本地 buffer
+            typingShadow.clear();
         }
-        lastTypingState = currentTyping;
+        lastTyping = currentTyping;
 
+        // 非阻塞检测键盘
         if (_kbhit())
         {
             char ch = _getch();
 
             if (currentTyping)
             {
+                // 输出线程正在打印，所有字符先存到 shadow
                 if (ch != '\r')
                 {
                     std::lock_guard<std::mutex> lock(shadowMutex);
-                    typingShadow += ch;
+                    typingShadow.push_back(ch);
                 }
             }
             else
             {
+                // 普通输入模式
                 if (ch == '\r')
                 {
+                    // 回车：结束本次输入
                     std::cout << std::endl;
-                    {
-                        std::lock_guard<std::mutex> lock(queueMutex);
-                        inputQueue.push(buffer);
-                    }
-                    queueCond.notify_one();
-                    buffer.clear();
+                    outLine = buffer;
+                    return;
                 }
                 else if (ch == '\b')
                 {
+                    // 退格：删除 buffer 最后一个字符并回退光标
                     if (!buffer.empty())
                     {
                         buffer.pop_back();
@@ -94,19 +85,14 @@ void ConsoleInputManager::inputLoop()
                 }
                 else
                 {
-                    buffer += ch;
+                    // 普通字符：追加并回显
+                    buffer.push_back(ch);
                     std::cout << ch;
                 }
             }
         }
 
+        // 降低 CPU 占用率
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-}
-
-ConsoleInputManager::InputManagerFinalizer::~InputManagerFinalizer()
-{
-    isRunning = false;
-    if (inputThread.joinable())
-        inputThread.join();
 }
